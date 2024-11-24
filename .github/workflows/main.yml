@@ -1,0 +1,86 @@
+name: Secure Build
+
+on: 
+  push:
+    branches:
+      - main  # Trigger on changes to the main branch
+  pull_request:  # Include PRs for code checks
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # Minimal permissions needed
+      id-token: write  # For image signing later
+
+    steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1  # Fetch only the latest commit for faster and safer execution
+
+      # Step 2: Set up Go Environment
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.20
+
+      # Step 3: Run Static Code Analysis with Gosec
+      - name: Run Static Code Analysis
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.16.0
+          gosec ./...
+        env:
+          GOSUMDB: "sum.golang.org"  # Protects against dependency tampering
+          GONOSUMDB: "private.com/*" # Excludes private modules from sum DB
+
+      # Step 4: Dependency Scanning
+      - name: Dependency Scan
+        uses: anchore/syft-action@v0.10.0
+        with:
+          path: .
+          output: "json"  # Generates detailed reports for dependencies
+          fail-on: "critical"  # Fail the build on critical vulnerabilities
+
+      # Step 5: Build Docker Image with BuildKit
+      - name: Build Docker Image
+        run: |
+          DOCKER_BUILDKIT=1 docker build -t my-secure-app:latest .
+
+      # Step 6: Scan Docker Image for Vulnerabilities
+      - name: Scan Docker Image
+        uses: aquasecurity/trivy-action@v0.11.0
+        with:
+          image-ref: my-secure-app:latest
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: 1  # Fail the build if vulnerabilities are found
+          timeout: 5m  # Prevent indefinite scans
+
+      # Step 7: Sign Docker Image
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.0.0
+        with:
+          cosign-release: 'v2.1.0'
+      - name: Sign Docker Image
+        env:
+          COSIGN_EXPERIMENTAL: "1"  # Enable experimental features
+        run: |
+          cosign sign --key ${{ secrets.COSIGN_KEY }} my-secure-app:latest
+
+      # Step 8: Secret Scanning
+      - name: Secret Scanning
+        uses: trufflesecurity/trufflehog-actions-scan@v3
+        with:
+          scan: git
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 9: Upload Scan Reports
+      - name: Upload Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: scan-reports
+          path: |
+            *.json
+            *.log
