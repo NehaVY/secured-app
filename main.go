@@ -29,13 +29,17 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Secure: Basic token-based authentication
 		token := r.Header.Get("Authorization")
-		if token != "Bearer securetoken123" {
+		secretKey := getEnvVariable() // Fetch the secret key
+
+		// Example: use secretKey in your logic, such as checking against a stored key
+		if token != "Bearer " + secretKey {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
 }
+
 
 // Secure: Environment variable fetched securely
 func getEnvVariable() string {
